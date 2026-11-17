@@ -705,6 +705,13 @@ export class UniverseScene {
       this.scene.backgroundIntensity = 1.6;
       if (!this.travel && this.camera.position.distanceTo(this.stellarCenter) > 9000) this.exitToGalaxies(true);
     }
+    let nearest = Infinity;
+    this.objectGroups.forEach((group, id) => {
+      const object = byId[id];
+      const base = object.size * (object.type === 'galaxies' ? 2.65 : object.type === 'stars' ? 4.1 : 4.6);
+      nearest = Math.min(nearest, this.camera.position.distanceTo(group.position) / base);
+    });
+    this.callbacks.onProximity?.(0.3 + 1.2 * Math.exp(-0.54 * nearest));
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
   }

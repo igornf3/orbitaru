@@ -3,24 +3,17 @@ import {
   createIcons, Orbit, Search, Route, BookOpen, Volume2, VolumeX, Maximize, Minimize,
   ChevronRight, ArrowUpRight, Bookmark, BookmarkCheck, Play, Pause, RotateCcw,
   X, Plus, Navigation, Mouse, Keyboard, Sparkles, Check, Menu, Telescope,
-  Gauge, CircleHelp, Rocket, MapPin, CornerDownLeft, Send, MessageSquare
+  Gauge, CircleHelp, Rocket, MapPin, CornerDownLeft
 } from 'lucide';
 import { UniverseScene } from './scene.js';
 import { byId, grandTour, objects } from './data.js';
 
-const icons = { Orbit, Search, Route, BookOpen, Volume2, VolumeX, Maximize, Minimize, ChevronRight, ArrowUpRight, Bookmark, BookmarkCheck, Play, Pause, RotateCcw, X, Plus, Navigation, Mouse, Keyboard, Sparkles, Check, Menu, Telescope, Gauge, CircleHelp, Rocket, MapPin, CornerDownLeft, Send, MessageSquare };
+const icons = { Orbit, Search, Route, BookOpen, Volume2, VolumeX, Maximize, Minimize, ChevronRight, ArrowUpRight, Bookmark, BookmarkCheck, Play, Pause, RotateCcw, X, Plus, Navigation, Mouse, Keyboard, Sparkles, Check, Menu, Telescope, Gauge, CircleHelp, Rocket, MapPin, CornerDownLeft };
 const refreshIcons = () => createIcons({ icons, attrs: { 'stroke-width': 1.65 } });
 const readFavorites = () => {
   try { return JSON.parse(localStorage.getItem('orbita-favorites') || '[]'); }
   catch { return []; }
 };
-const FEEDBACK_COOKIE = 'orbita-feedback';
-const getCookie = (name) => document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`))?.[1] || null;
-const setCookie = (name, value) => {
-  document.cookie = `${name}=${value};path=/;max-age=${365 * 86400};SameSite=Lax`;
-};
-const feedbackState = () => getCookie(FEEDBACK_COOKIE);
-
 const state = {
   selectedId: 'earth', category: 'planets', query: '', speed: 1,
   favorites: readFavorites(), sound: false, cruise: false,
@@ -50,7 +43,6 @@ app.innerHTML = `
     </nav>
     <div class="header-tools">
       <div class="session"><span class="live-dot"></span><span>СЕАНС</span><b id="session-time">00:00</b></div>
-      <button class="icon-button" data-action="feedback" aria-label="Отправить отзыв разработчику" title="Отправить отзыв"><i data-lucide="message-square"></i></button>
       <button class="icon-button" data-action="sound" aria-label="Включить космический звук" title="Космический звук"><i data-lucide="volume-x"></i></button>
       <button class="icon-button" data-action="fullscreen" aria-label="Полноэкранный режим" title="Полноэкранный режим"><i data-lucide="maximize"></i></button>
       <button class="icon-button mobile-menu" data-action="toggle-catalog" aria-label="Открыть каталог"><i data-lucide="menu"></i></button>
@@ -119,7 +111,6 @@ app.innerHTML = `
 
   <footer class="statusbar">
     <div><span class="status-dot"></span><span id="flight-status">НА ОРБИТЕ</span><b>·</b><span id="engine-status">ДВИГАТЕЛЬ ГОТОВ</span></div>
-    <button data-action="feedback"><i data-lucide="message-square"></i>Отзыв</button>
     <button data-action="guide"><i data-lucide="circle-help"></i>Управление</button>
   </footer>
 
@@ -218,7 +209,7 @@ function toggleFavorite() {
   renderDetails();
 }
 
-function openModal(type, intro) {
+function openModal(type) {
   state.modal = type;
   const modal = document.querySelector('#modal');
   const content = document.querySelector('#modal-content');
@@ -240,23 +231,6 @@ function openModal(type, intro) {
           return `<div class="saved-route"><span class="object-thumb ${object.type}" style="${thumbStyle(object)}"></span><button data-route-object="${id}"><strong>${object.name}</strong><small>${object.kind}</small></button><button class="icon-button" data-remove-route="${id}" aria-label="Удалить ${object.name}"><i data-lucide="x"></i></button></div>`;
         }).join('') : '<div class="empty-routes"><i data-lucide="bookmark"></i><strong>Здесь пока просторно</strong><p>Нажмите на закладку рядом с названием объекта, чтобы добавить его в свой журнал.</p></div>'}
       </div>
-    `;
-  } else if (type === 'feedback') {
-    content.innerHTML = `
-      <span class="eyebrow">ОБРАТНАЯ СВЯЗЬ</span>
-      <h2 id="modal-title">Отзыв разработчику</h2>
-      <p class="modal-intro">${intro || 'Расскажите, что понравилось в путешествии по вселенной и что стоит улучшить.'}</p>
-      <form class="feedback-form" id="feedback-form" novalidate>
-        <label>Имя <span>(необязательно)</span>
-          <input name="contact" type="text" maxlength="120" autocomplete="name" placeholder="Как к вам обращаться" />
-        </label>
-        <label>Отзыв
-          <textarea name="text" required maxlength="2000" rows="6" placeholder="Ваши впечатления, идеи и найденные ошибки"></textarea>
-        </label>
-        <input class="hp" name="hp" type="text" tabindex="-1" autocomplete="off" aria-hidden="true" />
-        <button class="primary-button" type="submit"><i data-lucide="send"></i>Отправить отзыв</button>
-        <p class="feedback-status" role="status"></p>
-      </form>
     `;
   } else {
     content.innerHTML = `
@@ -295,11 +269,6 @@ function continueTour(completedId) {
   if (state.tourIndex >= grandTour.length - 1) {
     state.touring = false;
     showToast('Гранд-тур завершён. Вселенная ждёт новых открытий');
-    setTimeout(() => {
-      if (feedbackState()) return;
-      setCookie(FEEDBACK_COOKIE, 'offered');
-      openModal('feedback', 'Вы только что прошли Гранд-тур! Поделитесь впечатлениями — ваш отзыв поможет сделать Орбиту лучше.');
-    }, 1600);
     return;
   }
   state.tourTimer = setTimeout(() => {
@@ -321,27 +290,27 @@ function showToast(message) {
   showToast.timer = setTimeout(() => toast.classList.remove('visible'), 3200);
 }
 
+const SOUND_BASE_GAIN = 0.5;
 let audioContext;
+let audioElement;
 let audioGain;
+let soundFactor = 1;
+let lastAppliedGain = 0;
 async function toggleSound() {
   if (!audioContext) {
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    audioElement = new Audio('/textures/noise.mp3');
+    audioElement.loop = true;
     audioGain = audioContext.createGain();
     audioGain.gain.value = 0;
-    audioGain.connect(audioContext.destination);
-    [55, 82.41, 110.2].forEach((frequency, index) => {
-      const oscillator = audioContext.createOscillator();
-      const gain = audioContext.createGain();
-      oscillator.type = index === 1 ? 'triangle' : 'sine';
-      oscillator.frequency.value = frequency;
-      gain.gain.value = index === 2 ? 0.08 : 0.18;
-      oscillator.connect(gain).connect(audioGain);
-      oscillator.start();
-    });
+    audioContext.createMediaElementSource(audioElement).connect(audioGain).connect(audioContext.destination);
   }
   await audioContext.resume();
   state.sound = !state.sound;
-  audioGain.gain.setTargetAtTime(state.sound ? 0.075 : 0, audioContext.currentTime, 0.5);
+  if (state.sound) await audioElement.play().catch(() => {});
+  else audioElement.pause();
+  lastAppliedGain = state.sound ? SOUND_BASE_GAIN * soundFactor : 0;
+  audioGain.gain.setTargetAtTime(lastAppliedGain, audioContext.currentTime, 0.5);
   const button = document.querySelector('[data-action="sound"]');
   button.innerHTML = `<i data-lucide="${state.sound ? 'volume-2' : 'volume-x'}"></i>`;
   button.classList.toggle('active', state.sound);
@@ -357,6 +326,14 @@ const scene = new UniverseScene(document.querySelector('#universe'), {
   },
   onObjectClick: (id) => selectObject(id),
   onFocusChange: (id) => { state.category = byId[id].type; selectObject(id, false); },
+  onProximity: (factor) => {
+    soundFactor = factor;
+    if (!audioContext || !state.sound) return;
+    const target = SOUND_BASE_GAIN * factor;
+    if (Math.abs(target - lastAppliedGain) < 0.0005) return;
+    lastAppliedGain = target;
+    audioGain.gain.setTargetAtTime(target, audioContext.currentTime, 0.3);
+  },
   onLevelChange: (level) => showToast(level === 'stellar' ? 'Масштаб: звёзды. Вы внутри Млечного Пути' : 'Масштаб: галактики'),
   onTravelStart: (id, duration) => {
     document.querySelector('#flight-status').textContent = 'В ПУТИ';
@@ -406,7 +383,6 @@ app.addEventListener('click', (event) => {
   const actions = {
     explore: () => { closeModal(); document.querySelector('#catalog').classList.remove('open'); },
     routes: () => openModal('routes'), guide: () => openModal('guide'),
-    feedback: () => openModal('feedback'),
     'close-modal': closeModal, travel: () => scene.travelTo(state.selectedId),
     favorite: toggleFavorite, cruise: toggleCruise, tour: startTour,
     overview: () => scene.showOverview(), reset: () => scene.travelTo(state.selectedId),
@@ -420,43 +396,6 @@ app.addEventListener('click', (event) => {
     'toggle-catalog': () => document.querySelector('#catalog').classList.toggle('open')
   };
   actions[actionButton.dataset.action]?.();
-});
-
-app.addEventListener('submit', async (event) => {
-  if (event.target.id !== 'feedback-form') return;
-  event.preventDefault();
-  const form = event.target;
-  const status = form.querySelector('.feedback-status');
-  const button = form.querySelector('button[type="submit"]');
-  const field = (name) => form.elements.namedItem(name).value;
-  if (!field('text').trim()) {
-    status.textContent = 'Напишите пару слов — пустой отзыв не отправится.';
-    return;
-  }
-  button.disabled = true;
-  status.textContent = '';
-  try {
-    const response = await fetch('/api/feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contact: field('contact'), text: field('text'), hp: field('hp') })
-    });
-    if (response.ok) {
-      setCookie(FEEDBACK_COOKIE, 'submitted');
-      document.querySelector('#modal-content').innerHTML = `
-        <span class="eyebrow">ОБРАТНАЯ СВЯЗЬ</span>
-        <h2 id="modal-title">Спасибо!</h2>
-        <p class="modal-intro">Ваш отзыв сохранён и будет прочитан разработчиком.</p>
-      `;
-      refreshIcons();
-    } else {
-      status.textContent = 'Не удалось отправить отзыв. Попробуйте ещё раз.';
-      button.disabled = false;
-    }
-  } catch {
-    status.textContent = 'Нет соединения с сервером. Отзыв не отправлен.';
-    button.disabled = false;
-  }
 });
 
 document.querySelector('#search').addEventListener('input', (event) => {
@@ -482,11 +421,6 @@ document.querySelector('.brand').addEventListener('click', (event) => {
 });
 
 window.addEventListener('keydown', (event) => {
-  if (event.code === 'KeyF' && event.ctrlKey && event.shiftKey) {
-    event.preventDefault();
-    window.open('/admin/feedback', '_blank');
-    return;
-  }
   if (event.code === 'Escape') { closeModal(); document.querySelector('#catalog').classList.remove('open'); }
   if (event.code === 'Slash' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
     event.preventDefault();

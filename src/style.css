@@ -319,18 +319,6 @@ input[type='range']::-moz-range-thumb { width: 9px; height: 9px; border: 2px sol
   .toast { top: 76px; max-width: calc(100vw - 30px); width: max-content; font-size: 9px; }
 }
 
-.feedback-form { display: flex; flex-direction: column; gap: 16px; max-width: 520px; }
-.feedback-form label { display: flex; flex-direction: column; gap: 7px; color: #738196; font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
-.feedback-form label span { color: #5a6577; font-weight: 500; letter-spacing: 0.05em; text-transform: none; }
-.feedback-form input[type='text'], .feedback-form textarea { padding: 11px 13px; border: 1px solid var(--line); border-radius: 9px; outline: 0; background: rgba(255, 255, 255, 0.045); color: #e7edf3; font-family: inherit; font-size: 12px; line-height: 1.5; transition: border-color 0.2s, background 0.2s; }
-.feedback-form input[type='text']:focus, .feedback-form textarea:focus { border-color: rgba(200, 249, 120, 0.5); background: rgba(255, 255, 255, 0.07); }
-.feedback-form input::placeholder, .feedback-form textarea::placeholder { color: #5a6577; }
-.feedback-form textarea { resize: vertical; min-height: 110px; }
-.feedback-form .hp { position: absolute; left: -200vw; top: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; }
-.feedback-form .primary-button { align-self: flex-start; width: auto; min-width: 190px; }
-.feedback-form .primary-button:disabled { opacity: 0.55; cursor: default; }
-.feedback-status { min-height: 15px; margin: 0; color: #e8a0a0; font-size: 10px; }
-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
