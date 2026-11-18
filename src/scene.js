@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { byId, objects, SOLAR_DISTANCE_SCALE, STAR_DISTANCE_SCALE, GALAXY_DISTANCE_SCALE } from './data.js';
 
+const GALAXY_PITCH = { milkyway: 0.24, andromeda: 0.25, whirlpool: 0.34, triangulum: 0.44, pinwheel: 0.4, ngc1300: 0.36, 'black-eye': 0.22 };
+const GALAXY_TILT = { andromeda: [1.2, -0.62], sombrero: [1.47, 0.12], cigar: [1.4, -0.42], 'centaurus-a': [0.12, -0.45], 'black-eye': [0.9, -0.5], m87: [0.3, 0] };
+
 export class UniverseScene {
   constructor(container, callbacks = {}) {
     this.container = container;
@@ -336,105 +339,187 @@ export class UniverseScene {
   }
 
   createGalaxy(object, group) {
+    const size = object.size;
     const count = innerWidth < 650 ? 42000 : 68000;
+    const elliptical = object.shape === 'elliptical';
+    const starburst = object.shape === 'starburst';
+    const spiral = Boolean(object.arms) && !object.shape;
+    const pitch = GALAXY_PITCH[object.id] ?? 0.3;
+    const armStart = size * (object.bar ? 0.3 : 0.1);
+    const armAngle = (r, arm) => arm / object.arms * Math.PI * 2 + Math.log(Math.max(r, armStart) / armStart) / Math.tan(pitch);
+    const gaussian = () => Math.sqrt(-2 * Math.log(Math.max(0.0001, Math.random()))) * Math.cos(Math.PI * 2 * Math.random());
+    const expRadius = (scale, max) => -scale * Math.log(1 - Math.random() * (1 - Math.exp(-max / scale)));
+    const sersic = (scale, max) => Math.min(max, scale * Math.pow(-Math.log(1 - Math.random() * 0.9999), 2));
+    const direction = () => {
+      const u = Math.random() * 2 - 1;
+      const a = Math.random() * Math.PI * 2;
+      const s = Math.sqrt(1 - u * u);
+      return [Math.cos(a) * s, Math.sin(a) * s, u];
+    };
+    const palette = {
+      core: new THREE.Color('#fff1d6'),
+      old: new THREE.Color('#ffd29e'),
+      disk: new THREE.Color(object.color).lerp(new THREE.Color('#fff0dc'), 0.45),
+      young: new THREE.Color(object.color).lerp(new THREE.Color('#a8c8ff'), 0.35),
+      hii: new THREE.Color('#ff86b4'),
+      outflow: new THREE.Color('#ff5236'),
+      jet: new THREE.Color('#9ec9ff'),
+      starburstDisk: new THREE.Color('#b6cdf2')
+    };
+    const knots = spiral ? Array.from({ length: object.arms * 22 }, (_, k) => {
+      const r = armStart + Math.pow(Math.random(), 0.8) * size * 0.85;
+      const a = armAngle(r, k % object.arms) + gaussian() * 0.05;
+      return [Math.cos(a) * r, Math.sin(a) * r, size * (0.015 + Math.random() * 0.025)];
+    }) : [];
+    const jetDir = new THREE.Vector3(0.55, 0.35, 0.76).normalize();
+
     const positions = new Float32Array(count * 3);
     const colors = new Float32Array(count * 3);
     const sizes = new Float32Array(count);
-    const inner = new THREE.Color('#ffe1ba');
-    const outer = new THREE.Color(object.color);
-    const gaussian = () => Math.sqrt(-2 * Math.log(Math.max(0.0001, Math.random()))) * Math.cos(Math.PI * 2 * Math.random());
     for (let i = 0; i < count; i++) {
-      const population = Math.random();
-      const bulge = population < 0.2;
-      const bar = object.bar && population >= 0.2 && population < 0.35;
-      const armPopulation = !bulge && !bar && population >= 0.68 && object.arms && object.shape !== 'irregular' && object.shape !== 'elliptical';
-      let x, y, z, radius, brightness;
-      if (bulge) {
-        radius = Math.min(object.size * 0.34, Math.abs(gaussian()) * object.size * 0.13);
-        const angle = Math.random() * Math.PI * 2;
-        x = Math.cos(angle) * radius;
-        y = Math.sin(angle) * radius;
-        z = gaussian() * object.size * (object.shape === 'elliptical' ? 0.12 : 0.055);
-        brightness = 0.8 + Math.random() * 0.55;
-      } else if (bar) {
-        radius = Math.random() * object.size * 0.48;
-        x = radius * (Math.random() < 0.5 ? -1 : 1);
-        y = gaussian() * object.size * 0.035;
-        z = gaussian() * object.size * 0.015;
-        brightness = 0.65 + Math.random() * 0.45;
-      } else if (armPopulation) {
-        radius = Math.pow(Math.random(), 0.68) * object.size;
-        const arm = i % object.arms;
-        const angle = (arm / object.arms) * Math.PI * 2 + radius * 0.25;
-        const spread = gaussian() * object.size * (0.034 + radius / object.size * 0.062);
-        const radialSpread = gaussian() * object.size * 0.014;
-        x = Math.cos(angle) * (radius + radialSpread) + Math.cos(angle + Math.PI / 2) * spread;
-        y = Math.sin(angle) * (radius + radialSpread) + Math.sin(angle + Math.PI / 2) * spread;
-        z = gaussian() * object.size * 0.026;
-        brightness = 0.38 + Math.random() * 0.44;
+      const p = Math.random();
+      let x, y, z, color, brightness;
+      let starSize = 0.3 + Math.random() * 0.6;
+      if (elliptical) {
+        const axes = object.id === 'm87' ? [1, 0.95, 0.9] : [1, 0.84, 0.78];
+        if (object.id === 'centaurus-a' && p < 0.035) {
+          const along = gaussian() * size * 0.3;
+          const side = Math.random() < 0.5 ? -1 : 1;
+          x = along;
+          y = Math.sin(along / size * 3.2) * size * 0.05 + side * size * (0.045 + Math.abs(gaussian()) * 0.015);
+          z = gaussian() * size * 0.3;
+          color = palette.jet;
+          brightness = 0.7 + Math.random() * 0.3;
+        } else if (object.id === 'm87' && p < 0.02) {
+          const t = Math.pow(Math.random(), 1.4) * size * 0.7;
+          const spread = size * (0.003 + t / size * 0.025);
+          x = jetDir.x * t + gaussian() * spread;
+          y = jetDir.y * t + gaussian() * spread;
+          z = jetDir.z * t + gaussian() * spread;
+          color = palette.jet;
+          brightness = 1 - t / size * 0.8;
+        } else if (p < 0.05) {
+          const [dx, dy, dz] = direction();
+          const r = expRadius(size * 0.55, size * 1.7);
+          [x, y, z] = [dx * r, dy * r, dz * r];
+          color = palette.old;
+          brightness = 0.45;
+          starSize = 0.55 + Math.random() * 0.35;
+        } else {
+          const [dx, dy, dz] = direction();
+          const r = sersic(size * 0.05, size * 1.6);
+          [x, y, z] = [dx * r * axes[0], dy * r * axes[1], dz * r * axes[2]];
+          color = palette.core.clone().lerp(palette.old, Math.min(1, r / size * 1.8));
+          brightness = 0.3 + 0.65 * Math.exp(-r / (size * 0.12)) + Math.random() * 0.15;
+        }
+      } else if (starburst && p < 0.24) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const t = expRadius(0.45, 1.5);
+        const filament = (Math.floor(Math.random() * 28) / 28) * Math.PI * 2 + gaussian() * 0.07;
+        const cone = size * (0.05 + t * 0.4);
+        const rr = cone * (Math.random() < 0.65 ? Math.abs(gaussian()) * 0.55 : Math.sqrt(Math.random()));
+        x = Math.cos(filament) * rr * 1.1;
+        y = Math.sin(filament) * rr * 0.8;
+        z = side * (size * 0.04 + t * size);
+        color = palette.outflow.clone().lerp(palette.core, Math.max(0, 0.55 - t));
+        brightness = (0.35 + Math.random() * 0.45) * (1 - Math.min(t, 1) * 0.35);
+      } else if (p < (object.bulgeHeavy ? 0.42 : starburst ? 0.36 : 0.16)) {
+        const [dx, dy, dz] = direction();
+        const r = sersic(size * (object.bulgeHeavy ? 0.055 : 0.03), size * 0.7);
+        [x, y, z] = [dx * r, dy * r, dz * r * (object.bulgeHeavy ? 0.78 : 0.62)];
+        color = palette.core.clone().lerp(palette.old, Math.min(1, r / (size * 0.3)));
+        brightness = 0.45 + 0.7 * Math.exp(-r / (size * 0.07)) + Math.random() * 0.2;
+        starSize = 0.3 + Math.random() * 0.85;
+      } else if (object.bar && p < 0.3) {
+        x = gaussian() * size * 0.19;
+        y = gaussian() * size * 0.05 * (0.55 + 0.45 * Math.exp(-(x * x) / (2 * (size * 0.12) ** 2)));
+        z = gaussian() * size * 0.022;
+        color = palette.core.clone().lerp(palette.old, Math.min(1, Math.abs(x) / (size * 0.4)));
+        brightness = 0.5 + Math.random() * 0.35;
+      } else if (spiral && p < 0.62) {
+        if (Math.random() < 0.06) {
+          const [kx, ky, ks] = knots[Math.floor(Math.random() * knots.length)];
+          x = kx + gaussian() * ks;
+          y = ky + gaussian() * ks;
+          z = gaussian() * size * 0.008;
+          color = Math.random() < 0.3 ? palette.hii : palette.young;
+          brightness = 0.45 + Math.random() * 0.35;
+          starSize = 0.4 + Math.random() * 0.5;
+        } else {
+          const arm = i % object.arms;
+          const r = armStart + expRadius(size * 0.34, size * 1.05);
+          const a = armAngle(r, arm) + gaussian() * 0.07;
+          const width = size * (0.05 + r / size * 0.14);
+          const offset = gaussian() * width * (Math.random() < 0.7 ? 1 : 2.2);
+          x = Math.cos(a) * r - Math.sin(a) * offset;
+          y = Math.sin(a) * r + Math.cos(a) * offset;
+          z = gaussian() * size * 0.014;
+          const patch = 0.55 + 0.45 * Math.sin(r / size * 17 + arm * 2.1) * Math.sin(r / size * 7.3 + arm);
+          const youth = Math.exp(-(offset * offset) / (2 * (width * 0.6) ** 2)) * Math.min(1, r / (size * 0.4));
+          color = palette.disk.clone().lerp(palette.young, youth * 0.75);
+          brightness = (0.24 + youth * 0.3 + Math.random() * 0.22) * patch;
+        }
       } else {
-        radius = Math.sqrt(Math.random()) * object.size;
-        const angle = Math.random() * Math.PI * 2;
-        const clump = object.shape === 'irregular' ? 1 + Math.sin(angle * 5) * 0.24 : 1;
-        x = Math.cos(angle) * radius * clump;
-        y = Math.sin(angle) * radius * clump;
-        z = gaussian() * object.size * (object.shape === 'elliptical' ? radius / object.size * 0.25 : 0.026);
-        brightness = 0.28 + Math.random() * 0.44;
+        const ring = object.id === 'sombrero' && Math.random() < 0.45;
+        const r = ring ? size * (0.74 + gaussian() * 0.06) : expRadius(size * (starburst ? 0.3 : 0.34), size * 1.35);
+        const a = Math.random() * Math.PI * 2;
+        x = Math.cos(a) * r * (starburst ? 1.35 : 1);
+        y = Math.sin(a) * r;
+        z = gaussian() * size * (starburst ? 0.03 : 0.015) * (1 + r / size * 0.6);
+        color = palette.core.clone().lerp(starburst ? palette.starburstDisk : palette.disk, Math.min(1, r / size * 1.4));
+        brightness = 0.22 + Math.random() * 0.33;
       }
       positions.set([x, y, z], i * 3);
-      const mix = Math.min(1, radius / object.size * 0.9 + Math.random() * 0.18);
-      const color = inner.clone().lerp(outer, mix);
       colors.set([color.r * brightness, color.g * brightness, color.b * brightness], i * 3);
-      sizes[i] = 0.3 + Math.random() * (bulge ? 0.85 : 0.65);
+      sizes[i] = starSize;
     }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
-    const material = new THREE.ShaderMaterial({
-      vertexShader: `
-        attribute vec3 aColor;
-        attribute float aSize;
-        varying vec3 vColor;
-        void main() {
-          vColor = aColor;
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = clamp(aSize * (230.0 / -mvPosition.z), 0.55, 3.8);
-          gl_Position = projectionMatrix * mvPosition;
-        }
-      `,
-      fragmentShader: `
-        varying vec3 vColor;
-        void main() {
-          float d = length(gl_PointCoord - vec2(0.5));
-          float alpha = smoothstep(0.5, 0.0, d);
-          gl_FragColor = vec4(vColor, alpha * 0.64);
-        }
-      `,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending
-    });
-    const points = new THREE.Points(geometry, material);
+    const points = new THREE.Points(this.createPointGeometry(positions, colors, sizes), this.createGalaxyPointMaterial(THREE.AdditiveBlending, 0.64));
     points.userData.objectId = object.id;
     group.add(points);
-    group.rotation.x = object.id === 'andromeda' ? 0.8 : object.id === 'sombrero' ? 1.05 : 0.38;
-    group.rotation.z = object.id === 'sombrero' ? 0.5 : -0.16;
     this.interactive.push(points);
 
-    const disk = new THREE.Mesh(
-      new THREE.PlaneGeometry(object.size * 2.35, object.size * 2.35),
-      new THREE.MeshBasicMaterial({ map: this.createGalaxyHaze(object), transparent: true, opacity: 0.72, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })
-    );
-    disk.position.z = -0.12;
-    group.add(disk);
+    const dust = this.createGalaxyDust(object, { gaussian, expRadius, armAngle, armStart, spiral });
+    if (dust) group.add(dust);
+
+    group.rotation.x = GALAXY_TILT[object.id]?.[0] ?? 0.38;
+    group.rotation.z = GALAXY_TILT[object.id]?.[1] ?? -0.16;
+
+    const detail = [points];
+    if (dust) detail.push(dust);
+    if (!elliptical) {
+      const disk = new THREE.Mesh(
+        new THREE.PlaneGeometry(size * 2.35, size * 2.35),
+        new THREE.MeshBasicMaterial({ map: this.createGalaxyHaze(object, armStart, pitch), transparent: true, opacity: 0.72, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })
+      );
+      disk.position.z = -0.12;
+      if (starburst) disk.scale.set(1.25, 0.7, 1);
+      group.add(disk);
+      detail.push(disk);
+    } else {
+      const halo = this.createGlow(object.color);
+      halo.material.opacity = 0.55;
+      halo.scale.set(size * 2.6, size * 2.6 * 0.92, 1);
+      group.add(halo);
+      detail.push(halo);
+    }
     const core = this.createGlow('#ffd7ad');
-    core.scale.set(object.size * 0.85, object.size * 0.5, 1);
+    const coreAspect = elliptical ? 0.92 : starburst ? 0.53 : 0.6;
+    const coreBase = size * (elliptical ? 1.05 : starburst ? 0.6 : 0.85);
+    core.scale.set(coreBase, coreBase * coreAspect, 1);
     core.userData.objectId = object.id;
     group.add(core);
     this.interactive.push(core);
-    group.userData.detail = [points, disk];
+    group.userData.detail = detail;
     group.userData.core = core;
+    group.userData.coreAspect = coreAspect;
+    group.userData.coreBase = coreBase;
+
+    if (object.id === 'whirlpool') {
+      const companion = this.createGlow('#ffd7ad');
+      companion.scale.set(size * 0.34, size * 0.24, 1);
+      companion.position.set(size * 1.15, -size * 0.3, 0);
+      group.add(companion);
+    }
 
     if (object.id === 'milkyway') {
       this.milkyWaySky = this.textureLoader.load('/textures/8k_stars_milky_way.jpg');
@@ -443,31 +528,115 @@ export class UniverseScene {
     }
   }
 
-  createGalaxyHaze(object) {
+  createGalaxyDust(object, { gaussian, expRadius, armAngle, armStart, spiral }) {
+    const size = object.size;
+    if (!spiral && !object.dustLane && object.shape !== 'starburst') return null;
+    const count = innerWidth < 650 ? 5000 : 9000;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+    const dark = new THREE.Color('#140b07');
+    for (let i = 0; i < count; i++) {
+      let x, y, z;
+      if (object.id === 'sombrero') {
+        const r = size * (0.8 + gaussian() * 0.07);
+        const a = Math.random() * Math.PI * 2;
+        [x, y, z] = [Math.cos(a) * r, Math.sin(a) * r, gaussian() * size * 0.012];
+      } else if (object.id === 'centaurus-a') {
+        const r = size * (0.03 + Math.sqrt(Math.random()) * 0.5);
+        const a = Math.random() * Math.PI * 2;
+        x = Math.cos(a) * r;
+        z = Math.sin(a) * r;
+        y = Math.sin(x / size * 3.2) * size * 0.05 + gaussian() * size * 0.022 * (1 - r / size);
+      } else if (object.id === 'black-eye' && Math.random() < 0.6) {
+        const r = size * (0.16 + Math.random() * 0.3);
+        const a = -0.35 * Math.PI + Math.pow(Math.random(), 0.8) * 1.05 * Math.PI;
+        [x, y, z] = [Math.cos(a) * r, Math.sin(a) * r, gaussian() * size * 0.01];
+      } else if (object.shape === 'starburst') {
+        const r = expRadius(size * 0.25, size * 0.9);
+        const a = Math.random() * Math.PI * 2;
+        [x, y, z] = [Math.cos(a) * r * 1.35, Math.sin(a) * r, gaussian() * size * 0.02];
+      } else {
+        const r = armStart * 1.1 + expRadius(size * 0.3, size * 0.95);
+        const a = armAngle(r, i % object.arms) + gaussian() * 0.06;
+        const width = size * (0.05 + r / size * 0.14);
+        const offset = -width * 0.4 + gaussian() * width * 0.45;
+        [x, y, z] = [Math.cos(a) * r - Math.sin(a) * offset, Math.sin(a) * r + Math.cos(a) * offset, gaussian() * size * 0.006];
+      }
+      positions.set([x, y, z], i * 3);
+      colors.set([dark.r, dark.g, dark.b], i * 3);
+      sizes[i] = 1 + Math.random() * 1.2;
+    }
+    const dustOpacity = object.id === 'sombrero' ? 0.35 : object.id === 'centaurus-a' ? 0.2 : object.id === 'black-eye' ? 0.18 : 0.1;
+    const dust = new THREE.Points(this.createPointGeometry(positions, colors, sizes), this.createGalaxyPointMaterial(THREE.NormalBlending, dustOpacity));
+    dust.renderOrder = 2;
+    return dust;
+  }
+
+  createPointGeometry(positions, colors, sizes) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+    return geometry;
+  }
+
+  createGalaxyPointMaterial(blending, opacity) {
+    return new THREE.ShaderMaterial({
+      uniforms: { uOpacity: { value: opacity } },
+      vertexShader: `
+        attribute vec3 aColor;
+        attribute float aSize;
+        varying vec3 vColor;
+        void main() {
+          vColor = aColor;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = clamp(aSize * (230.0 / -mvPosition.z), 0.55, 6.0);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform float uOpacity;
+        varying vec3 vColor;
+        void main() {
+          float d = length(gl_PointCoord - vec2(0.5));
+          float alpha = smoothstep(0.5, 0.0, d);
+          gl_FragColor = vec4(vColor, alpha * uOpacity);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending
+    });
+  }
+
+  createGalaxyHaze(object, armStart, pitch) {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 256;
     const ctx = canvas.getContext('2d');
     const image = ctx.createImageData(canvas.width, canvas.height);
     const inner = [255, 225, 186];
     const outer = object.color.match(/[a-f\d]{2}/gi).map((channel) => parseInt(channel, 16));
-    const spiral = object.arms && object.shape !== 'irregular' && object.shape !== 'elliptical';
+    const spiral = Boolean(object.arms) && !object.shape;
+    const halfSpan = object.size * 1.175;
     for (let y = 0; y < canvas.height; y++) {
       for (let x = 0; x < canvas.width; x++) {
         const nx = ((x + 0.5) / canvas.width - 0.5) * 2;
         const ny = (0.5 - (y + 0.5) / canvas.height) * 2;
         const radius = Math.hypot(nx, ny);
-        const edgeFade = 1 - THREE.MathUtils.smoothstep(radius, 0.7, 1);
-        const diskLight = Math.exp(-radius * 2.8) * 0.3;
+        const edgeFade = 1 - THREE.MathUtils.smoothstep(radius, 0.55, 1);
+        const diskLight = Math.exp(-radius * 3.2) * 0.32;
         let armLight = 0;
-        if (spiral && radius > 0.08 && radius < 1) {
-          const angle = Math.atan2(ny, nx);
-          const phase = (Math.cos(object.arms * (angle - radius * object.size * 0.25)) + 1) * 0.5;
-          armLight = Math.pow(phase, 2.4) * Math.sin(radius * Math.PI) * 0.24;
+        if (spiral && radius > 0.05) {
+          const r = radius * halfSpan;
+          const phase = (Math.cos(object.arms * (Math.atan2(ny, nx) - Math.log(Math.max(r, armStart) / armStart) / Math.tan(pitch))) + 1) * 0.5;
+          armLight = Math.pow(phase, 1.6) * Math.exp(-radius * 1.6) * 0.26 * Math.min(1, r / armStart);
         }
-        const mix = Math.min(1, radius * 0.9);
+        const barLight = object.bar ? Math.exp(-((nx * halfSpan) ** 2) / (2 * (object.size * 0.19) ** 2) - ((ny * halfSpan) ** 2) / (2 * (object.size * 0.05) ** 2)) * 0.3 : 0;
+        const mix = Math.min(1, radius * 1.1);
         const offset = (y * canvas.width + x) * 4;
         for (let channel = 0; channel < 3; channel++) image.data[offset + channel] = inner[channel] * (1 - mix) + outer[channel] * mix;
-        image.data[offset + 3] = (diskLight + armLight) * edgeFade * 255;
+        image.data[offset + 3] = Math.min(1, (diskLight + armLight + barLight) * edgeFade) * 255;
       }
     }
     ctx.putImageData(image, 0, 0);
@@ -693,8 +862,8 @@ export class UniverseScene {
         const distance = this.camera.position.distanceTo(group.position);
         const near = this.travel?.id === object.id || distance < 1050;
         group.userData.detail.forEach((part) => { part.visible = near; });
-        const coreWidth = Math.max(object.size * 0.85, distance * 0.016);
-        group.userData.core.scale.set(coreWidth, coreWidth * 0.6, 1);
+        const coreWidth = Math.max(group.userData.coreBase, distance * 0.016);
+        group.userData.core.scale.set(coreWidth, coreWidth * group.userData.coreAspect, 1);
       });
       const milkyWay = this.objectGroups.get('milkyway');
       if (!this.travel && this.camera.position.distanceTo(milkyWay.position) < byId.milkyway.size * 0.9) {
