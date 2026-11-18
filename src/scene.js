@@ -5,6 +5,89 @@ import { byId, objects, SOLAR_DISTANCE_SCALE, STAR_DISTANCE_SCALE, GALAXY_DISTAN
 const GALAXY_PITCH = { milkyway: 0.24, andromeda: 0.25, whirlpool: 0.34, triangulum: 0.44, pinwheel: 0.4, ngc1300: 0.36, 'black-eye': 0.22 };
 const GALAXY_TILT = { andromeda: [1.2, -0.62], sombrero: [1.47, 0.12], cigar: [1.4, -0.42], 'centaurus-a': [0.12, -0.45], 'black-eye': [0.9, -0.5], m87: [0.3, 0] };
 
+const STAR_LOOK = {
+  sirius: { hot: '#eef4ff', mid: '#a9c4f5', cool: '#4f6fc4', cells: 30, contrast: 0.3, spots: 0, limb: 0.5, seed: 1.3 },
+  proxima: { hot: '#ffc08a', mid: '#f0603a', cool: '#5a140c', cells: 9, contrast: 0.42, spots: 0.75, limb: 0.7, flare: 1, seed: 4.7 },
+  betelgeuse: { hot: '#ffd29a', mid: '#f2662f', cool: '#4a1006', cells: 2.6, contrast: 0.5, spots: 0.25, limb: 0.85, lump: 0.06, seed: 8.2 },
+  trappist1: { hot: '#ffa070', mid: '#d8432a', cool: '#3a0a06', cells: 8, contrast: 0.45, spots: 0.85, limb: 0.75, flare: 1.3, seed: 2.9 },
+  kepler452: { hot: '#fffbe6', mid: '#ffd27e', cool: '#b8601a', cells: 28, contrast: 0.3, spots: 0.35, limb: 0.6, seed: 6.1 },
+  '51pegasi': { hot: '#fff3d4', mid: '#ffc066', cool: '#a24c14', cells: 24, contrast: 0.34, spots: 0.5, limb: 0.64, seed: 3.6 },
+  hd209458: { hot: '#ffffff', mid: '#fff0c8', cool: '#d4924a', cells: 34, contrast: 0.24, spots: 0.15, limb: 0.5, seed: 9.4 }
+};
+const EXOPLANET_LOOK = { 'proxima-b': 'eyeball', 'trappist1-b': 'lava', 'trappist1-e': 'ocean', 'kepler452-b': 'arid', '51pegasi-b': 'hotjupiter', 'hd209458-b': 'evaporating' };
+
+const hash3 = (x, y, z, seed) => {
+  let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(z, 1274126177) ^ Math.imul(seed, 1442695041);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+};
+const valueNoise3 = (x, y, z, seed) => {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const fx = x - xi, fy = y - yi, fz = z - zi;
+  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy), w = fz * fz * (3 - 2 * fz);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const c = (dx, dy, dz) => hash3(xi + dx, yi + dy, zi + dz, seed);
+  return lerp(
+    lerp(lerp(c(0, 0, 0), c(1, 0, 0), u), lerp(c(0, 1, 0), c(1, 1, 0), u), v),
+    lerp(lerp(c(0, 0, 1), c(1, 0, 1), u), lerp(c(0, 1, 1), c(1, 1, 1), u), v),
+    w
+  );
+};
+const fbm3 = (x, y, z, seed, octaves = 5) => {
+  let sum = 0, amp = 0.5, norm = 0, freq = 1;
+  for (let i = 0; i < octaves; i++) {
+    sum += amp * valueNoise3(x * freq + 11.3, y * freq + 7.1, z * freq + 3.7, seed + i * 101);
+    norm += amp;
+    amp *= 0.5;
+    freq *= 2.03;
+  }
+  return sum / norm;
+};
+const NOISE_GLSL = `
+  vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 permute(vec4 x) { return mod289(((x * 34.0) + 1.0) * x); }
+  vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+  float snoise(vec3 v) {
+    const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
+    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+    vec3 i = floor(v + dot(v, C.yyy));
+    vec3 x0 = v - i + dot(i, C.xxx);
+    vec3 g = step(x0.yzx, x0.xyz);
+    vec3 l = 1.0 - g;
+    vec3 i1 = min(g.xyz, l.zxy);
+    vec3 i2 = max(g.xyz, l.zxy);
+    vec3 x1 = x0 - i1 + C.xxx;
+    vec3 x2 = x0 - i2 + C.yyy;
+    vec3 x3 = x0 - D.yyy;
+    i = mod289(i);
+    vec4 p = permute(permute(permute(i.z + vec4(0.0, i1.z, i2.z, 1.0)) + i.y + vec4(0.0, i1.y, i2.y, 1.0)) + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+    float n_ = 0.142857142857;
+    vec3 ns = n_ * D.wyz - D.xzx;
+    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+    vec4 x_ = floor(j * ns.z);
+    vec4 y_ = floor(j - 7.0 * x_);
+    vec4 x = x_ * ns.x + ns.yyyy;
+    vec4 y = y_ * ns.x + ns.yyyy;
+    vec4 h = 1.0 - abs(x) - abs(y);
+    vec4 b0 = vec4(x.xy, y.xy);
+    vec4 b1 = vec4(x.zw, y.zw);
+    vec4 s0 = floor(b0) * 2.0 + 1.0;
+    vec4 s1 = floor(b1) * 2.0 + 1.0;
+    vec4 sh = -step(h, vec4(0.0));
+    vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
+    vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
+    vec3 p0 = vec3(a0.xy, h.x);
+    vec3 p1 = vec3(a0.zw, h.y);
+    vec3 p2 = vec3(a1.xy, h.z);
+    vec3 p3 = vec3(a1.zw, h.w);
+    vec4 norm = taylorInvSqrt(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
+    p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+    vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
+    m = m * m;
+    return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
+  }
+`;
 export class UniverseScene {
   constructor(container, callbacks = {}) {
     this.container = container;
@@ -34,6 +117,8 @@ export class UniverseScene {
     this.manager.onLoad = () => this.callbacks.onReady?.();
     this.textureLoader = new THREE.TextureLoader(this.manager);
     this.clock = new THREE.Clock();
+    this.starMaterials = [];
+    this.spinners = [];
     this.objectGroups = new Map();
     this.interactive = [];
     this.rotating = [];
@@ -145,16 +230,23 @@ export class UniverseScene {
     const segments = object.id === 'sun' ? 96 : 64;
     const geometry = new THREE.SphereGeometry(object.size, segments, segments);
     if (object.id === 'moon') geometry.rotateY(-Math.PI / 2);
-    const texture = object.procedural
-      ? this.createProceduralPlanetTexture(object)
-      : object.type === 'stars' && object.id !== 'sun'
-        ? this.createStarSurface()
-        : this.textureLoader.load(`/textures/${object.texture || '2k_sun'}.jpg`);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-    const material = object.type === 'stars'
-      ? new THREE.MeshBasicMaterial({ map: texture, color: object.color })
-      : new THREE.MeshStandardMaterial({ map: texture, roughness: 0.92, metalness: 0, emissive: object.type === 'exoplanets' ? object.color : 0x000000, emissiveIntensity: object.type === 'exoplanets' ? 0.3 : 0 });
+    let material;
+    let planetLayers = null;
+    if (STAR_LOOK[object.id]) material = this.createStarMaterial(object);
+    else if (EXOPLANET_LOOK[object.id]) {
+      planetLayers = this.createExoplanetLayers(object);
+      material = new THREE.MeshStandardMaterial({
+        map: planetLayers.map, roughness: planetLayers.roughness, metalness: 0,
+        emissive: 0xffffff, emissiveMap: planetLayers.emissive || planetLayers.map, emissiveIntensity: planetLayers.emissive ? 0.95 : 0.32
+      });
+    } else {
+      const texture = object.procedural ? this.createProceduralPlanetTexture(object) : this.textureLoader.load(`/textures/${object.texture || '2k_sun'}.jpg`);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+      material = object.type === 'stars'
+        ? new THREE.MeshBasicMaterial({ map: texture, color: object.color })
+        : new THREE.MeshStandardMaterial({ map: texture, roughness: 0.92, metalness: 0, emissive: object.type === 'exoplanets' ? object.color : 0x000000, emissiveIntensity: object.type === 'exoplanets' ? 0.3 : 0 });
+    }
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData.objectId = object.id;
     group.add(mesh);
@@ -185,25 +277,261 @@ export class UniverseScene {
       group.add(glow);
     }
     if (object.atmosphere) this.addAtmosphere(group, object.size, object.color, 1.08);
+    if (planetLayers?.clouds) {
+      const clouds = new THREE.Mesh(
+        new THREE.SphereGeometry(object.size * 1.012, 64, 64),
+        new THREE.MeshStandardMaterial({ map: planetLayers.clouds, transparent: true, depthWrite: false, roughness: 1, emissive: 0xffffff, emissiveMap: planetLayers.clouds, emissiveIntensity: 0.25 })
+      );
+      group.add(clouds);
+      this.rotating.push({ mesh: clouds, speed: 0.05 / Math.sqrt(object.size) });
+    }
+    if (EXOPLANET_LOOK[object.id] === 'evaporating') this.createEvaporatingTail(object, group);
+    if (object.id === 'betelgeuse') this.addAtmosphere(group, object.size, '#ff5a2a', 1.75);
+    if (object.id === 'sirius') this.createSiriusB(object, group);
     if (object.id === 'saturn') this.createSaturnRings(group, object.size);
   }
 
-  createStarSurface() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 256;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#eeeeee';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.filter = 'blur(4px)';
-    for (let i = 0; i < 700; i++) {
-      const shade = 150 + Math.floor(Math.random() * 105);
-      ctx.fillStyle = `rgba(${shade},${shade},${shade},0.22)`;
-      ctx.beginPath();
-      ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, 1 + Math.random() * 9, 0, Math.PI * 2);
-      ctx.fill();
+  createStarMaterial(object) {
+    const look = STAR_LOOK[object.id];
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: Math.random() * 100 },
+        uHot: { value: new THREE.Color(look.hot) },
+        uMid: { value: new THREE.Color(look.mid) },
+        uCool: { value: new THREE.Color(look.cool) },
+        uCells: { value: look.cells },
+        uContrast: { value: look.contrast },
+        uSpots: { value: look.spots },
+        uLimb: { value: look.limb },
+        uFlare: { value: look.flare || 0 },
+        uLump: { value: look.lump || 0 },
+        uSeed: { value: look.seed }
+      },
+      vertexShader: `
+        uniform float uTime;
+        uniform float uLump;
+        uniform float uSeed;
+        varying vec3 vPos;
+        varying vec3 vNormal;
+        varying vec3 vView;
+        ${NOISE_GLSL}
+        void main() {
+          vPos = normalize(position);
+          float lump = uLump > 0.0 ? snoise(vPos * 1.6 + vec3(uSeed, uTime * 0.015, 0.0)) * uLump : 0.0;
+          vec4 mvPosition = modelViewMatrix * vec4(position * (1.0 + lump), 1.0);
+          vNormal = normalize(normalMatrix * normal);
+          vView = -mvPosition.xyz;
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform vec3 uHot;
+        uniform vec3 uMid;
+        uniform vec3 uCool;
+        uniform float uCells;
+        uniform float uContrast;
+        uniform float uSpots;
+        uniform float uLimb;
+        uniform float uFlare;
+        uniform float uSeed;
+        varying vec3 vPos;
+        varying vec3 vNormal;
+        varying vec3 vView;
+        ${NOISE_GLSL}
+        float fbm(vec3 p) {
+          float sum = 0.0;
+          float amp = 0.5;
+          for (int i = 0; i < 4; i++) {
+            sum += amp * snoise(p);
+            p *= 2.07;
+            amp *= 0.5;
+          }
+          return sum;
+        }
+        void main() {
+          vec3 p = vPos;
+          float t = uTime * 0.035;
+          float cells = pow(1.0 - abs(snoise(p * uCells + vec3(t, -t, t * 0.6) + uSeed)), 2.2);
+          float large = fbm(p * uCells * 0.3 + vec3(0.0, t * 0.4, uSeed * 1.7)) * 0.5 + 0.5;
+          float heat = mix(0.62, mix(large, cells, 0.55), uContrast * 1.6);
+          float spotNoise = snoise(p * 2.3 + vec3(uSeed * 3.1, 0.0, t * 0.15));
+          float penumbra = smoothstep(0.42, 0.62, spotNoise) * uSpots;
+          float umbra = smoothstep(0.6, 0.78, spotNoise) * uSpots;
+          float faculae = smoothstep(0.24, 0.4, spotNoise) * (1.0 - smoothstep(0.4, 0.55, spotNoise)) * uSpots;
+          heat += faculae * 0.18 - penumbra * 0.32 - umbra * 0.3;
+          float mu = clamp(dot(normalize(vNormal), normalize(vView)), 0.0, 1.0);
+          float limb = 1.0 - uLimb * (1.0 - pow(mu, 0.55));
+          heat = clamp(heat * (0.55 + limb * 0.55), 0.0, 1.0);
+          vec3 color = heat < 0.5 ? mix(uCool, uMid, heat * 2.0) : mix(uMid, uHot, heat * 2.0 - 1.0);
+          color *= 0.8 + limb * 0.5;
+          float flareWave = pow(max(0.0, sin(uTime * 0.42 + uSeed * 7.0)), 28.0) * uFlare;
+          float flareSpot = smoothstep(0.5, 0.82, snoise(p * 3.1 + uSeed * 5.0));
+          color += uHot * flareWave * flareSpot * 1.8;
+          gl_FragColor = vec4(color, 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }
+      `
+    });
+    this.starMaterials.push(material);
+    return material;
+  }
+
+  createSiriusB(object, group) {
+    const pivot = new THREE.Group();
+    pivot.rotation.x = 0.42;
+    const dwarf = new THREE.Mesh(new THREE.SphereGeometry(object.size * 0.07, 24, 24), new THREE.MeshBasicMaterial({ color: '#eaf3ff' }));
+    dwarf.position.set(object.size * 3.4, 0, 0);
+    const glow = this.createGlow('#bcd6ff');
+    glow.scale.setScalar(object.size * 0.9);
+    glow.position.copy(dwarf.position);
+    pivot.add(dwarf, glow);
+    group.add(pivot);
+    this.spinners.push({ object: pivot, speed: 0.06 });
+  }
+
+  createEvaporatingTail(object, group) {
+    const host = this.objectGroups.get(object.host);
+    const away = group.position.clone().sub(host.position).normalize();
+    const side = new THREE.Vector3(0, 1, 0).cross(away).normalize();
+    const up = away.clone().cross(side);
+    const count = 4500;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+    const base = new THREE.Color('#7fc8ff');
+    for (let i = 0; i < count; i++) {
+      const t = Math.pow(Math.random(), 1.8);
+      const length = object.size * (0.9 + t * 9);
+      const spread = object.size * (0.35 + t * 1.8) * Math.sqrt(Math.random());
+      const angle = Math.random() * Math.PI * 2;
+      const point = away.clone().multiplyScalar(length)
+        .add(side.clone().multiplyScalar(Math.cos(angle) * spread + t * t * object.size * 2.2))
+        .add(up.clone().multiplyScalar(Math.sin(angle) * spread));
+      positions.set([point.x, point.y, point.z], i * 3);
+      const fade = (1 - t) * (0.5 + Math.random() * 0.5);
+      colors.set([base.r * fade, base.g * fade, base.b * fade], i * 3);
+      sizes[i] = object.size * (0.05 + Math.random() * 0.08);
     }
-    return new THREE.CanvasTexture(canvas);
+    const tail = new THREE.Points(this.createPointGeometry(positions, colors, sizes), this.createGalaxyPointMaterial(THREE.AdditiveBlending, 0.8));
+    group.add(tail);
+  }
+
+  createExoplanetLayers(object) {
+    const look = EXOPLANET_LOOK[object.id];
+    const width = 512;
+    const height = 256;
+    const seed = [...object.id].reduce((sum, char) => sum * 31 + char.charCodeAt(0), 7) & 0xffff;
+    const makeCanvas = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      return { canvas, ctx, image: ctx.createImageData(width, height) };
+    };
+    const surface = makeCanvas();
+    const glow = ['lava', 'hotjupiter'].includes(look) ? makeCanvas() : null;
+    const cloudLayer = ['ocean', 'arid', 'eyeball'].includes(look) ? makeCanvas() : null;
+    const ramp = (stops, t) => {
+      t = THREE.MathUtils.clamp(t, 0, 1);
+      for (let i = 1; i < stops.length; i++) {
+        if (t <= stops[i][0]) {
+          const [t0, c0] = stops[i - 1];
+          const [t1, c1] = stops[i];
+          const k = (t - t0) / Math.max(t1 - t0, 0.0001);
+          return [0, 1, 2].map((ch) => c0[ch] + (c1[ch] - c0[ch]) * k);
+        }
+      }
+      return stops[stops.length - 1][1];
+    };
+    const rgb = (hex) => hex.match(/[a-f\d]{2}/gi).map((channel) => parseInt(channel, 16));
+    const P = {
+      ice: rgb('#e4eef7'), iceBlue: rgb('#9fbfd8'), crack: rgb('#5d84a8'), deep: rgb('#0d2440'), ocean: rgb('#1d4d78'), shallow: rgb('#3f8a9c'),
+      redLand: rgb('#6b3a2a'), darkLand: rgb('#3a2a22'), rust: rgb('#8e4b2e'), olive: rgb('#55623a'), moss: rgb('#38503a'),
+      sand: rgb('#d7b07a'), ochre: rgb('#b77a42'), dune: rgb('#9a5f34'), rock: rgb('#6e5446'), sea: rgb('#24575e'),
+      basalt: rgb('#1d1714'), ash: rgb('#3e332e'), lava: rgb('#ff5a14'), lavaCore: rgb('#ffd36a'),
+      hotDark: rgb('#4a1410'), hotMid: rgb('#b8431d'), hotLight: rgb('#f2a35c'), hotCream: rgb('#f7d9a6'),
+      tealDeep: rgb('#0e2f4a'), teal: rgb('#2f7aa6'), tealLight: rgb('#8cc6dc'), tealPale: rgb('#d0e6ea')
+    };
+    for (let y = 0; y < height; y++) {
+      const lat = (0.5 - (y + 0.5) / height) * Math.PI;
+      const cosLat = Math.cos(lat);
+      for (let x = 0; x < width; x++) {
+        const lon = ((x + 0.5) / width) * Math.PI * 2;
+        const px = -Math.cos(lon) * cosLat;
+        const py = Math.sin(lat);
+        const pz = Math.sin(lon) * cosLat;
+        const n = (scale, s = 0, oct = 5) => fbm3(px * scale, py * scale, pz * scale, seed + s, oct);
+        let color;
+        let emission = null;
+        let cloud = 0;
+        if (look === 'eyeball') {
+          const facing = -px;
+          const wobble = (n(2.4) - 0.5) * 0.35;
+          const ridge = 1 - Math.abs(n(6, 3, 4) * 2 - 1);
+          if (facing > 0.7 + wobble) color = ramp([[0, P.shallow], [1, P.deep]], (facing - 0.7) * 2.2 + (n(5, 9) - 0.5) * 0.4);
+          else if (facing > 0.48 + wobble) color = ramp([[0, P.darkLand], [0.5, P.redLand], [1, P.rust]], n(7, 5));
+          else color = ridge > 0.9 ? P.crack : ramp([[0, P.iceBlue], [1, P.ice]], n(4, 11) + (0.45 - facing) * 0.3);
+          cloud = facing > 0.35 ? THREE.MathUtils.smoothstep(n(3.5, 21), 0.55, 0.78) * 0.85 : 0;
+        } else if (look === 'lava') {
+          const crust = n(3);
+          color = ramp([[0, P.basalt], [0.6, P.ash], [1, P.rock]], crust);
+          const cracks = 1 - Math.abs(n(4.2, 7, 4) * 2 - 1);
+          const flow = THREE.MathUtils.smoothstep(cracks, 0.9, 0.985) + THREE.MathUtils.smoothstep(n(1.6, 13), 0.72, 0.82) * 0.6;
+          const heat = Math.min(1, flow);
+          emission = ramp([[0, [0, 0, 0]], [0.5, P.lava], [1, P.lavaCore]], heat);
+          color = color.map((ch, i) => ch * (1 - heat * 0.7) + P.lava[i] * heat * 0.7);
+        } else if (look === 'ocean') {
+          const elevation = n(1.8) + (n(6, 4, 3) - 0.5) * 0.12;
+          if (elevation < 0.56) color = ramp([[0.25, P.deep], [0.5, P.ocean], [0.56, P.shallow]], elevation);
+          else color = ramp([[0.56, P.olive], [0.66, P.moss], [0.78, P.rock]], elevation);
+          if (Math.abs(py) > 0.8 + (n(5, 8) - 0.5) * 0.2) color = P.ice;
+          const warp = n(2, 31, 3);
+          cloud = THREE.MathUtils.smoothstep(fbm3(px * 4 + warp * 2, py * 9, pz * 4 + warp, seed + 17, 5), 0.58, 0.8) * 0.8;
+        } else if (look === 'arid') {
+          const elevation = n(2.2);
+          if (elevation < 0.4) color = ramp([[0.2, P.sea], [0.4, P.shallow]], elevation);
+          else color = ramp([[0.4, P.sand], [0.55, P.ochre], [0.7, P.dune], [0.85, P.rock]], elevation + (n(9, 6, 3) - 0.5) * 0.1);
+          if (Math.abs(py) > 0.88 + (n(5, 8) - 0.5) * 0.15) color = P.ice;
+          cloud = THREE.MathUtils.smoothstep(n(3.2, 19), 0.6, 0.82) * 0.7;
+        } else if (look === 'hotjupiter') {
+          const warp = (n(3) - 0.5) * 0.5;
+          const band = Math.sin((py + warp) * 13) * 0.5 + 0.5;
+          const detail = n(9, 5, 4);
+          color = ramp([[0, P.hotDark], [0.45, P.hotMid], [0.8, P.hotLight], [1, P.hotCream]], band * 0.75 + detail * 0.3);
+          const storm = THREE.MathUtils.smoothstep(n(1.4, 23), 0.68, 0.8);
+          color = color.map((ch, i) => ch * (1 - storm) + P.hotDark[i] * storm);
+          emission = color.map((ch) => ch * (0.35 + detail * 0.3));
+        } else {
+          const warp = (n(2.6) - 0.5) * 0.45;
+          const band = Math.sin((py + warp) * 10 + n(6, 3, 3) * 2) * 0.5 + 0.5;
+          color = ramp([[0, P.tealDeep], [0.4, P.teal], [0.8, P.tealLight], [1, P.tealPale]], band * 0.8 + n(8, 9, 4) * 0.25);
+        }
+        const shade = 0.85 + cosLat * 0.15;
+        const offset = (y * width + x) * 4;
+        for (let ch = 0; ch < 3; ch++) surface.image.data[offset + ch] = color[ch] * shade;
+        surface.image.data[offset + 3] = 255;
+        if (glow) {
+          for (let ch = 0; ch < 3; ch++) glow.image.data[offset + ch] = emission[ch];
+          glow.image.data[offset + 3] = 255;
+        }
+        if (cloudLayer) {
+          for (let ch = 0; ch < 3; ch++) cloudLayer.image.data[offset + ch] = 245;
+          cloudLayer.image.data[offset + 3] = cloud * 255;
+        }
+      }
+    }
+    const finish = (layer) => {
+      if (!layer) return null;
+      layer.ctx.putImageData(layer.image, 0, 0);
+      const texture = new THREE.CanvasTexture(layer.canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+      return texture;
+    };
+    return { map: finish(surface), emissive: finish(glow), clouds: finish(cloudLayer), roughness: ['ocean', 'eyeball'].includes(look) ? 0.6 : 0.9 };
   }
 
   createProceduralPlanetTexture(object) {
@@ -849,6 +1177,8 @@ export class UniverseScene {
     }
     if (this.travel) this.updateTravel(rawDelta);
     else this.moveCamera(delta);
+    this.starMaterials.forEach((material) => { material.uniforms.uTime.value += delta; });
+    this.spinners.forEach(({ object, speed }) => { object.rotation.y += speed * delta * Math.min(this.speed, 20); });
     this.rotating.forEach(({ mesh, speed }) => {
       if (this.getApparentRadius(mesh) < 2) return;
       mesh.rotateY(speed * delta * Math.min(this.speed, 20));
